@@ -1,0 +1,1181 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User management and authentication
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  username  String?  @unique
+  name      String?
+  avatar    String?
+  bio       String?
+  phone     String?  @unique
+  verified  Boolean  @default(false)
+  twoFactorEnabled Boolean @default(false)
+  twoFactorSecret String?
+  
+  // Passwords for email/password authentication
+  password  String?
+  
+  // OAuth accounts
+  accounts      Account[]
+  sessions      Session[]
+  
+  // User roles and permissions
+  roleId    String
+  role      Role     @relation(fields: [roleId], references: [id])
+  
+  // User preferences and settings
+  preferences   Json?
+  notifications Json?
+  
+  // User activity
+  lastLogin     DateTime?
+  loginCount    Int       @default(0)
+  isActive      Boolean   @default(true)
+  
+  // Content created by user
+  blogPosts     BlogPost[]
+  reviews       Review[]
+  comments      Comment[]
+  comparisons   Comparison[]
+  
+  // User favorites and saved content
+  favoriteDevices Device[] @relation("UserFavoriteDevices")
+  savedComparisons Comparison[] @relation("UserSavedComparisons")
+  
+  // Content management relations
+  createdContentBlocks ContentBlock[] @relation("BlockCreator")
+  createdSectionTemplates SectionTemplate[] @relation("TemplateCreator")
+  assignedSections ContentSection[] @relation("SectionAssignee")
+  createdContentVersions ContentVersion[] @relation("ContentVersionAuthor")
+  collaborationParticipants CollaborationParticipant[] @relation("CollaborationUser")
+  realtimeOperations RealtimeOperation[] @relation("OperationUser")
+  contentComments ContentComment[] @relation("ContentCommentAuthor")
+  resolvedComments ContentComment[] @relation("CommentResolver")
+  assignedWorkflows WorkflowStatus[] @relation("WorkflowAssignee")
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Performance optimization indexes
+  @@index([email])
+  @@index([username])
+  @@index([roleId])
+  @@index([isActive])
+  @@index([verified])
+  @@index([createdAt])
+  @@index([lastLogin])
+  @@index([roleId, isActive])
+  @@index([email, isActive])
+  
+  @@map("users")
+}
+
+// NextAuth.js required models
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@index([provider])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expires])
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verificationtokens")
+}
+
+// Role-based access control
+model Role {
+  id          String       @id @default(cuid())
+  name        String       @unique
+  description String?
+  permissions Permission[]
+  users       User[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("roles")
+}
+
+model Permission {
+  id          String @id @default(cuid())
+  name        String @unique
+  description String?
+  resource    String
+  action      String
+  roles       Role[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("permissions")
+}
+
+// Blog content management
+model BlogPost {
+  id          String        @id @default(cuid())
+  title       String
+  slug        String        @unique
+  excerpt     String?
+  
+  // Unified Content Model - Single Source of Truth
+  contentType     ContentType   @default(TRADITIONAL) // Type of content structure
+  contentData     Json          @db.JsonB // Unified structured content (AST/JSON)
+  
+  // Legacy support fields
+  content     String?       @db.Text // Traditional HTML/Text content (deprecated)
+  sections    Json?         // For sectioned blog posts (deprecated)
+  
+  // Cached formats for performance (auto-generated from contentData)
+  cachedMarkdown  String?   @db.Text
+  cachedHtml      String?   @db.Text
+  
+  featuredImage String?
+  
+  // Blog classification
+  blogType        BlogType      @default(BLOG)
+  
+  // SEO and metadata
+  metaTitle       String?
+  metaDescription String?
+  keywords        String[]
+  
+  // Publishing workflow
+  status          PostStatus    @default(DRAFT)
+  publishedAt     DateTime?
+  scheduledAt     DateTime?
+  
+  // Auto-save and drafts
+  isDraft         Boolean       @default(true)
+  lastAutoSaved   DateTime?
+  
+  // Author and editorial
+  authorId        String
+  author          User          @relation(fields: [authorId], references: [id])
+  
+  // Device relation (for reviews and descriptions)
+  deviceId        String?
+  device          Device?       @relation(fields: [deviceId], references: [id])
+  
+  // Content organization
+  categories      Category[]
+  tags            Tag[]
+  
+  // Engagement
+  views           Int           @default(0)
+  likes           Int           @default(0)
+  shares          Int           @default(0)
+  
+  // Comments and feedback
+  comments        Comment[]
+  commentsEnabled Boolean       @default(true)
+  
+  // Related content
+  relatedPosts    BlogPost[]    @relation("RelatedPosts")
+  relatedTo       BlogPost[]    @relation("RelatedPosts")
+  
+  // Enhanced content management relations
+  contentBlockUsages ContentBlockUsage[]
+  contentSections ContentSection[]
+  contentVersions ContentVersion[]
+  collaborationSessions CollaborationSession[]
+  contentComments ContentComment[] @relation("ContentComments")
+  seoAnalysis SEOAnalysis?
+  workflowStatus WorkflowStatus?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Performance optimization indexes
+  @@index([slug])
+  @@index([status])
+  @@index([blogType])
+  @@index([authorId])
+  @@index([deviceId])
+  @@index([publishedAt])
+  @@index([createdAt])
+  @@index([views])
+  @@index([status, publishedAt])
+  @@index([blogType, status])
+  @@index([authorId, status])
+  @@index([status, publishedAt, views])
+  @@index([contentType])
+  
+  @@map("blog_posts")
+}
+
+enum ContentType {
+  TRADITIONAL   // HTML/Rich text content
+  SECTIONED     // Section-based structured content
+  MARKDOWN      // Markdown content
+}
+
+enum PostStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+
+enum BlogType {
+  BLOG        // Regular blog post
+  REVIEW      // Product/device review
+  DESCRIPTION // Product/device description
+}
+
+model Category {
+  id          String     @id @default(cuid())
+  name        String     @unique
+  slug        String     @unique
+  description String?
+  color       String?
+  icon        String?
+  
+  // Hierarchy support
+  parentId    String?
+  parent      Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryHierarchy")
+  
+  // SEO
+  metaTitle       String?
+  metaDescription String?
+  
+  // Content associations
+  blogPosts   BlogPost[]
+  devices     Device[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([slug])
+  @@index([parentId])
+  @@index([name])
+  
+  @@map("categories")
+}
+
+model Tag {
+  id          String     @id @default(cuid())
+  name        String     @unique
+  slug        String     @unique
+  description String?
+  color       String?
+  
+  // Usage tracking
+  usageCount  Int        @default(0)
+  
+  // Content associations
+  blogPosts   BlogPost[]
+  devices     Device[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("tags")
+}
+
+// Mobile device comprehensive database
+model Brand {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  logo        String?
+  website     String?
+  country     String?
+  founded     Int?
+  
+  devices     Device[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("brands")
+}
+
+model Device {
+  id            String   @id @default(cuid())
+  name          String
+  model         String
+  slug          String   @unique
+  
+  // Basic Information
+  brandId       String
+  brand         Brand    @relation(fields: [brandId], references: [id])
+  
+  // Release and availability
+  releaseDate      DateTime?
+  discontinuedDate DateTime?
+  marketAvailability Json? // Regions where available
+  
+  // Pricing
+  launchPrice      Decimal?
+  currentPrice     Decimal?
+  priceHistory     PriceHistory[]
+  currency         String    @default("NPR")
+  
+  // Physical characteristics
+  dimensions       Json? // length, width, thickness in mm
+  weight           Float? // in grams
+  colors           String[]
+  buildMaterials   Json? // frame, back, glass info
+  waterResistance  String? // IP rating
+  
+  // Display specifications
+  displaySize      Float? // inches
+  displayResolution Json? // width x height pixels
+  displayTechnology String? // OLED, AMOLED, LCD etc
+  pixelDensity     Int? // PPI
+  aspectRatio      String?
+  refreshRate      Int? // Hz
+  touchSamplingRate Int? // Hz
+  peakBrightness   Int? // nits
+  hdrSupport       String[]
+  protection       String? // Gorilla Glass version
+  
+  // Performance
+  chipset          String?
+  cpuDetails       Json? // cores, architecture, clock speeds
+  gpu              String?
+  manufacturingProcess String? // 7nm, 5nm etc
+  ramConfigurations Int[] // Available RAM options in GB
+  storageConfigurations Int[] // Available storage options in GB
+  expandableStorage Boolean @default(false)
+  maxExpandableStorage Int?
+  
+  // Benchmark scores
+  benchmarks       Benchmark[]
+  
+  // Camera system
+  mainCamera       Json? // megapixels, aperture, sensor details
+  ultraWideCamera  Json?
+  telephotoCamera  Json?
+  macroCamera      Json?
+  depthSensor      Json?
+  frontCamera      Json?
+  videoRecording   Json? // resolutions, frame rates, features
+  cameraFeatures   String[]
+  
+  // Battery and charging
+  batteryCapacity     Int? // mAh
+  wiredCharging       Int? // Watts
+  wirelessCharging    Int? // Watts
+  reverseCharging     Boolean @default(false)
+  batteryLife         Json? // various usage scenarios
+  chargingProtocols   String[]
+  
+  // Connectivity
+  networkSupport      Json? // 5G, 4G bands
+  wifiStandards       String[]
+  bluetoothVersion    String?
+  nfcSupport          Boolean @default(false)
+  gpsFeatures         String[]
+  simConfiguration    String? // Single, Dual, eSIM
+  usbConnector        String?
+  headphoneJack       Boolean @default(false)
+  
+  // Software
+  operatingSystem     String?
+  osVersionAtLaunch   String?
+  customUI            String?
+  updateSupport       Json? // promised update timeline
+  securityFeatures    String[]
+  preinstalledApps    String[]
+  
+  // Audio and extras
+  speakers            Json? // configuration, features
+  audioFeatures       String[]
+  haptics             String?
+  specialFeatures     String[]
+  accessories         String[]
+  
+  // Content and media
+  images              DeviceImage[]
+  videos              DeviceVideo[]
+  
+  // User engagement
+  reviews             Review[]
+  averageRating       Float?
+  totalReviews        Int       @default(0)
+  views               Int       @default(0)
+  
+  // Blog posts (reviews, descriptions)
+  blogPosts           BlogPost[]
+  
+  // Rankings and comparisons
+  rankings            DeviceRanking[]
+  comparisons         ComparisonDevice[]
+  
+  // Content organization
+  categories          Category[]
+  tags                Tag[]
+  
+  // User favorites
+  favoritedBy         User[]    @relation("UserFavoriteDevices")
+  
+  // Enhanced device management relations
+  contentBlockUsages ContentBlockUsage[]
+  specifications DeviceSpecification[] @relation("DeviceSpecs")
+  seoAnalysis SEOAnalysis?
+  
+  // Availability and status
+  isActive            Boolean   @default(true)
+  availability        String    @default("available") // available, discontinued, upcoming
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Performance optimization indexes
+  @@index([slug])
+  @@index([brandId])
+  @@index([isActive])
+  @@index([availability])
+  @@index([releaseDate])
+  @@index([averageRating])
+  @@index([totalReviews])
+  @@index([views])
+  @@index([currentPrice])
+  @@index([brandId, isActive])
+  @@index([availability, releaseDate])
+  @@index([isActive, averageRating])
+  @@index([brandId, availability])
+  @@index([launchPrice, currentPrice])
+  @@index([displaySize])
+  @@index([batteryCapacity])
+  
+  @@map("devices")
+}
+
+model DeviceImage {
+  id       String @id @default(cuid())
+  deviceId String
+  device   Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  
+  url      String
+  alt      String?
+  type     String? // front, back, side, angle etc
+  order    Int     @default(0)
+  
+  createdAt DateTime @default(now())
+  
+  @@map("device_images")
+}
+
+model DeviceVideo {
+  id       String @id @default(cuid())
+  deviceId String
+  device   Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  
+  url         String
+  title       String?
+  description String?
+  thumbnail   String?
+  duration    Int? // in seconds
+  type        String? // review, unboxing, comparison
+  
+  createdAt DateTime @default(now())
+  
+  @@map("device_videos")
+}
+
+model PriceHistory {
+  id       String   @id @default(cuid())
+  deviceId String
+  device   Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  
+  price    Decimal
+  currency String   @default("NPR")
+  source   String? // retailer or source
+  date     DateTime @default(now())
+  
+  @@map("price_history")
+}
+
+model Benchmark {
+  id       String @id @default(cuid())
+  deviceId String
+  device   Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  
+  testName String // AnTuTu, Geekbench, etc
+  score    Int
+  version  String? // benchmark version
+  date     DateTime @default(now())
+  
+  @@map("benchmarks")
+}
+
+// Device ranking system
+model DeviceRanking {
+  id       String @id @default(cuid())
+  deviceId String
+  device   Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  
+  category     String // overall, gaming, camera, battery, value-for-money, etc
+  priceRange   String? // under-10k, under-20k, etc
+  rank         Int
+  score        Float
+  scoreDetails Json? // breakdown by criteria
+  
+  // Algorithm version and date
+  algorithmVersion String
+  calculatedAt     DateTime @default(now())
+  
+  @@unique([deviceId, category, priceRange])
+  @@map("device_rankings")
+}
+
+// Device comparison system
+model Comparison {
+  id          String             @id @default(cuid())
+  name        String?
+  description String?
+  
+  // User who created the comparison
+  userId      String?
+  user        User?              @relation(fields: [userId], references: [id])
+  
+  // Devices being compared
+  devices     ComparisonDevice[]
+  
+  // Sharing and visibility
+  isPublic    Boolean            @default(false)
+  shareToken  String?            @unique
+  
+  // Analytics
+  views       Int                @default(0)
+  
+  // Users who saved this comparison
+  savedBy     User[]             @relation("UserSavedComparisons")
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("comparisons")
+}
+
+model ComparisonDevice {
+  id           String     @id @default(cuid())
+  comparisonId String
+  comparison   Comparison @relation(fields: [comparisonId], references: [id], onDelete: Cascade)
+  deviceId     String
+  device       Device     @relation(fields: [deviceId], references: [id])
+  
+  order        Int        @default(0)
+  notes        String?
+  
+  @@unique([comparisonId, deviceId])
+  @@map("comparison_devices")
+}
+
+// Reviews and comments
+model Review {
+  id       String @id @default(cuid())
+  deviceId String
+  device   Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User   @relation(fields: [userId], references: [id])
+  
+  // Review content
+  title       String?
+  content     String     @db.Text
+  rating      Float // 1-5 stars
+  
+  // Detailed ratings
+  designRating      Float?
+  performanceRating Float?
+  cameraRating      Float?
+  batteryRating     Float?
+  valueRating       Float?
+  
+  // Review metadata
+  pros            String[]
+  cons            String[]
+  isRecommended   Boolean?
+  
+  // Purchase verification
+  isVerifiedPurchase Boolean @default(false)
+  purchaseDate       DateTime?
+  
+  // Moderation
+  isApproved      Boolean @default(false)
+  moderatedAt     DateTime?
+  moderatorNotes  String?
+  
+  // Engagement
+  likes           Int     @default(0)
+  dislikes        Int     @default(0)
+  helpfulVotes    Int     @default(0)
+  
+  comments        Comment[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([deviceId, userId])
+  @@map("reviews")
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  content   String   @db.Text
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  
+  // Polymorphic relations
+  blogPostId String?
+  blogPost   BlogPost? @relation(fields: [blogPostId], references: [id], onDelete: Cascade)
+  reviewId   String?
+  review     Review?   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  
+  // Nested comments
+  parentId  String?
+  parent    Comment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies   Comment[] @relation("CommentReplies")
+  
+  // Moderation
+  isApproved Boolean @default(false)
+  
+  // Engagement
+  likes     Int @default(0)
+  dislikes  Int @default(0)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("comments")
+}
+
+// Analytics and tracking
+model PageView {
+  id        String   @id @default(cuid())
+  path      String
+  userId    String?
+  sessionId String
+  userAgent String?
+  ipAddress String?
+  referrer  String?
+  
+  // Device/content specific tracking
+  deviceId  String?
+  postId    String?
+  
+  timestamp DateTime @default(now())
+  
+  @@map("page_views")
+}
+
+model SearchQuery {
+  id        String   @id @default(cuid())
+  query     String
+  filters   Json? // applied filters
+  results   Int // number of results
+  userId    String?
+  sessionId String
+  
+  timestamp DateTime @default(now())
+  
+  @@map("search_queries")
+}
+
+// Newsletter and notifications
+model Newsletter {
+  id          String @id @default(cuid())
+  email       String @unique
+  name        String?
+  isActive    Boolean @default(true)
+  preferences Json? // topics, frequency etc
+  
+  subscribedAt   DateTime @default(now())
+  unsubscribedAt DateTime?
+  
+  @@map("newsletter")
+}
+
+model Notification {
+  id      String @id @default(cuid())
+  userId  String
+  
+  title   String
+  message String
+  type    String // email, push, in-app
+  data    Json?
+  
+  isRead  Boolean @default(false)
+  readAt  DateTime?
+  
+  createdAt DateTime @default(now())
+  
+  @@map("notifications")
+}
+
+// Media management
+model Media {
+  id          String @id @default(cuid())
+  filename    String
+  originalName String
+  mimeType    String
+  size        Int
+  url         String
+  
+  // Image specific
+  width       Int?
+  height      Int?
+  alt         String?
+  
+  // Upload info
+  uploadedBy  String?
+  folder      String?
+  
+  createdAt DateTime @default(now())
+  
+  @@map("media")
+}
+
+// Content Block System for reusable components
+model ContentBlock {
+  id          String @id @default(cuid())
+  name        String
+  slug        String @unique
+  description String?
+  type        String // pros-cons, specs-table, comparison, custom
+  
+  // Block content structure
+  schema      Json   // Field definitions and validation rules
+  content     Json   // Default content data
+  
+  // Block metadata
+  category    String?
+  tags        String[]
+  icon        String?
+  
+  // Usage tracking
+  usageCount  Int    @default(0)
+  
+  // Versioning
+  version     String @default("1.0.0")
+  changelog   Json?  // Version history
+  
+  // Permissions
+  isPublic    Boolean @default(true)
+  createdById String
+  createdBy   User    @relation("BlockCreator", fields: [createdById], references: [id])
+  
+  // Usage in content
+  blockUsages ContentBlockUsage[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("content_blocks")
+}
+
+model ContentBlockUsage {
+  id        String @id @default(cuid())
+  blockId   String
+  block     ContentBlock @relation(fields: [blockId], references: [id])
+  
+  // Polymorphic usage - can be used in blog posts or devices
+  blogPostId String?
+  blogPost   BlogPost? @relation(fields: [blogPostId], references: [id], onDelete: Cascade)
+  deviceId   String?
+  device     Device? @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  
+  // Custom content for this usage
+  customData Json?
+  
+  // Position in content
+  sectionId  String?
+  order      Int @default(0)
+  
+  createdAt DateTime @default(now())
+  
+  @@map("content_block_usage")
+}
+
+// Section Templates for structured content creation
+model SectionTemplate {
+  id          String @id @default(cuid())
+  name        String
+  slug        String @unique
+  description String?
+  
+  // Template structure
+  sections    Json   // Array of section definitions
+  
+  // Template metadata
+  category    String? // device-review, blog-post, comparison
+  deviceTypes String[] // smartphone, laptop, tablet
+  
+  // Template settings
+  isDefault   Boolean @default(false)
+  isActive    Boolean @default(true)
+  
+  // Versioning
+  version     String @default("1.0.0")
+  parentId    String?
+  parent      SectionTemplate? @relation("TemplateVersions", fields: [parentId], references: [id])
+  versions    SectionTemplate[] @relation("TemplateVersions")
+  
+  // Usage tracking
+  usageCount  Int @default(0)
+  
+  // Permissions
+  createdById String
+  createdBy   User @relation("TemplateCreator", fields: [createdById], references: [id])
+  
+  // Content using this template
+  contentSections ContentSection[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("section_templates")
+}
+
+// Individual content sections (for sectioned content)
+model ContentSection {
+  id         String @id @default(cuid())
+  
+  // Section metadata
+  title      String
+  type       String // intro, design, performance, camera, etc.
+  order      Int    @default(0)
+  
+  // Section content (unified format)
+  contentData Json  @db.JsonB
+  
+  // Template reference
+  templateId String?
+  template   SectionTemplate? @relation(fields: [templateId], references: [id])
+  
+  // Parent content
+  blogPostId String?
+  blogPost   BlogPost? @relation(fields: [blogPostId], references: [id], onDelete: Cascade)
+  
+  // Section status
+  isComplete Boolean @default(false)
+  isRequired Boolean @default(false)
+  
+  // Collaboration
+  assigneeId String?
+  assignee   User? @relation("SectionAssignee", fields: [assigneeId], references: [id])
+  
+  // Version control
+  version    Int @default(1)
+  parentVersionId String?
+  parentVersion ContentSection? @relation("SectionVersions", fields: [parentVersionId], references: [id])
+  childVersions ContentSection[] @relation("SectionVersions")
+  
+  // Comments and feedback
+  comments   ContentComment[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("content_sections")
+}
+
+// Content versioning and audit trail
+model ContentVersion {
+  id        String @id @default(cuid())
+  
+  // Reference to content
+  blogPostId String?
+  blogPost   BlogPost? @relation(fields: [blogPostId], references: [id], onDelete: Cascade)
+  
+  // Version metadata
+  version    String // semantic versioning
+  label      String? // description of changes
+  changeType String // major, minor, patch, auto-save
+  
+  // Content snapshot
+  contentData Json @db.JsonB
+  metadata    Json? // additional metadata at time of save
+  
+  // User who made changes
+  authorId   String
+  author     User @relation("ContentVersionAuthor", fields: [authorId], references: [id])
+  
+  // Diff information
+  diffSummary Json? // summary of changes made
+  
+  // Status
+  isActive   Boolean @default(false) // current active version
+  isDraft    Boolean @default(false)
+  
+  createdAt DateTime @default(now())
+  
+  @@map("content_versions")
+}
+
+// Real-time collaboration system
+model CollaborationSession {
+  id         String @id @default(cuid())
+  
+  // Content being edited
+  blogPostId String?
+  blogPost   BlogPost? @relation(fields: [blogPostId], references: [id], onDelete: Cascade)
+  
+  // Session metadata
+  sessionToken String @unique
+  isActive     Boolean @default(true)
+  
+  // Participants
+  participants CollaborationParticipant[]
+  
+  // Real-time operations log
+  operations   RealtimeOperation[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("collaboration_sessions")
+}
+
+model CollaborationParticipant {
+  id        String @id @default(cuid())
+  sessionId String
+  session   CollaborationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  userId    String
+  user      User @relation("CollaborationUser", fields: [userId], references: [id])
+  
+  // Participant status
+  isActive  Boolean @default(true)
+  cursor    Json? // cursor position
+  selection Json? // text selection
+  
+  joinedAt DateTime @default(now())
+  leftAt   DateTime?
+  
+  @@unique([sessionId, userId])
+  @@map("collaboration_participants")
+}
+
+model RealtimeOperation {
+  id        String @id @default(cuid())
+  sessionId String
+  session   CollaborationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  userId    String
+  user      User @relation("OperationUser", fields: [userId], references: [id])
+  
+  // Operation details
+  type      String // insert, delete, retain
+  operation Json   // operational transformation data
+  
+  // Sequencing
+  sequence  Int
+  
+  createdAt DateTime @default(now())
+  
+  @@map("realtime_operations")
+}
+
+// Comments and feedback system for content sections
+model ContentComment {
+  id        String @id @default(cuid())
+  content   String @db.Text
+  
+  // Author
+  userId    String
+  user      User @relation("ContentCommentAuthor", fields: [userId], references: [id])
+  
+  // Target content
+  sectionId String?
+  section   ContentSection? @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  blogPostId String?
+  blogPost   BlogPost? @relation("ContentComments", fields: [blogPostId], references: [id], onDelete: Cascade)
+  
+  // Position in content (for inline comments)
+  startOffset Int?
+  endOffset   Int?
+  selectedText String?
+  
+  // Comment thread
+  parentId  String?
+  parent    ContentComment? @relation("CommentThread", fields: [parentId], references: [id])
+  replies   ContentComment[] @relation("CommentThread")
+  
+  // Status
+  isResolved Boolean @default(false)
+  resolvedBy String?
+  resolver   User? @relation("CommentResolver", fields: [resolvedBy], references: [id])
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("content_comments")
+}
+
+// SEO optimization and analysis
+model SEOAnalysis {
+  id         String @id @default(cuid())
+  
+  // Target content
+  blogPostId String? @unique
+  blogPost   BlogPost? @relation(fields: [blogPostId], references: [id], onDelete: Cascade)
+  deviceId   String? @unique
+  device     Device? @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  
+  // SEO metrics
+  score         Float // overall SEO score 0-100
+  titleScore    Float
+  metaScore     Float
+  contentScore  Float
+  keywordScore  Float
+  structureScore Float
+  
+  // Analysis results
+  title         String?
+  metaDescription String?
+  primaryKeyword String?
+  keywords      String[]
+  keywordDensity Json? // keyword -> density mapping
+  
+  // Recommendations
+  recommendations Json // array of improvement suggestions
+  
+  // Internal linking
+  internalLinks   Int @default(0)
+  externalLinks   Int @default(0)
+  brokenLinks     String[] // URLs of broken links
+  
+  // Schema markup
+  schemaMarkup    Json?
+  
+  // Performance metrics
+  readabilityScore Float?
+  averageWordsPerSentence Float?
+  
+  // Last analysis
+  analyzedAt    DateTime @default(now())
+  
+  @@map("seo_analysis")
+}
+
+// Enhanced device specifications with flexible schema
+model DeviceSpecification {
+  id        String @id @default(cuid())
+  deviceId  String
+  device    Device @relation("DeviceSpecs", fields: [deviceId], references: [id], onDelete: Cascade)
+  
+  // Specification metadata
+  category  String // Display, Performance, Camera, Battery, etc.
+  name      String
+  
+  // Flexible value storage
+  valueType String // string, number, boolean, json, array
+  value     Json
+  
+  // Display information
+  displayName String?
+  unit        String? // units for numeric values
+  description String?
+  
+  // Ordering and grouping
+  order       Int @default(0)
+  grouping    String? // sub-category grouping
+  
+  // Validation rules
+  validationRules Json?
+  
+  // Source and verification
+  source      String? // manufacturer, third-party test, etc.
+  isVerified  Boolean @default(false)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([deviceId, category, name])
+  @@map("device_specifications")
+}
+
+// Workflow management for content approval
+model WorkflowStatus {
+  id         String @id @default(cuid())
+  
+  // Content reference
+  blogPostId String? @unique
+  blogPost   BlogPost? @relation(fields: [blogPostId], references: [id], onDelete: Cascade)
+  
+  // Workflow state
+  status     String // draft, review, approved, rejected, published
+  stage      String // content-creation, editorial-review, seo-review, final-approval
+  
+  // Assignment
+  assigneeId String?
+  assignee   User? @relation("WorkflowAssignee", fields: [assigneeId], references: [id])
+  
+  // Deadline
+  dueDate    DateTime?
+  
+  // Notes and feedback
+  notes      String?
+  feedback   Json? // structured feedback from reviewers
+  
+  // History
+  previousStatus String?
+  statusHistory Json[] // array of status changes
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("workflow_status")
+}
+
+// System configuration
+model Setting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value Json
+  type  String // string, number, boolean, json
+  
+  updatedAt DateTime @updatedAt
+  
+  @@map("settings")
+}
